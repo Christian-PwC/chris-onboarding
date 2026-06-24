@@ -14,3 +14,6 @@ class ChatRequest(BaseModel):
 class LoginRequest(BaseModel):
     user_id: str
     password: str
+
+class ProfileUpdateRequest(BaseModel):
+    favorite_movies: list[str]

@@ -5,7 +5,7 @@ from src.services.cosmos_connector import cosmos_connector
 from pydantic import BaseModel
 from datetime import datetime
 import uuid
-from src.models.schemas import ChatRequest, LoginRequest
+from src.models.schemas import ChatRequest, LoginRequest, ProfileUpdateRequest
 from src.services.auth_service import verify_password, create_access_token, decode_token, hash_password
 import uvicorn
 import requests
@@ -48,7 +48,7 @@ def register_user(credentials: LoginRequest):
         except Exception:
             pass
 
-        password_encrypted = hash_password(credentials.password)
+        password_encrypted = hash_password(credentials.password) #CRIPTO LA PASSWORD
 
         user_document = {
             "id": credentials.user_id,          
@@ -83,6 +83,7 @@ def login(credentials: LoginRequest):
         
         db_hash = user_document.get("password_hash")
         
+        # CREO ACCESS TOKEN
         if verify_password(credentials.password, db_hash):
             token = create_access_token(
                 user_id=credentials.user_id,
@@ -103,19 +104,18 @@ headers_browser = {
 @app.post("/ask")
 def ask_model(data: ChatRequest, current_user: str = Depends(get_current_user)):
     try:
-        user_id = data.user_id
+        # Sovrascriviamo o usiamo direttamente current_user per evitare disallineamenti
+        user_id = current_user
         session_id = data.session_id
-        if user_id != current_user:
-            raise HTTPException(status_code=403, detail="Non sei autorizzato")
         
-        # Gestione recupero/creazione del documento chat (identica a prima)
+        # Gestione recupero/creazione dello chat_document
         if not session_id:
             session_id = str(uuid.uuid4())
             chat_document = {
-                "id": session_id,
-                "user_id": user_id,
+                "id": session_id, 
+                "user_id": user_id, 
                 "title": data.question[:30] + "...", 
-                "system_prompt": data.system_prompt,
+                "system_prompt": data.system_prompt, 
                 "messages": []
             }
         else:
@@ -123,13 +123,34 @@ def ask_model(data: ChatRequest, current_user: str = Depends(get_current_user)):
                 chat_document = cosmos_connector.get_item(DATABASE_NAME, CONTAINER_NAME, session_id, user_id)
                 chat_document["system_prompt"] = data.system_prompt 
             except Exception:
-                chat_document = {"id": session_id, "user_id": user_id, "title": data.question[:30] + "...", "system_prompt": data.system_prompt, "messages": []}
+                chat_document = {
+                    "id": session_id, 
+                    "user_id": user_id, 
+                    "title": data.question[:30] + "...", 
+                    "system_prompt": data.system_prompt, 
+                    "messages": []
+                }
 
-        # Salva il messaggio dell'utente
         chat_document["messages"].append({"role": "user", "content": data.question})
 
-        # --- LOGICA DI SCRAPING LATO BACKEND ---
-        prompt_di_sistema_finale = chat_document.get("system_prompt") or ""
+        # --- RECUPERO DEI FILM PREFERITI DAL PROFILO UTENTE ---
+        contesto_preferiti = ""
+        try:
+            user_profile = cosmos_connector.get_item(
+                database_name=DATABASE_NAME,
+                container_name=USER_CONTAINER_NAME,
+                item_id=user_id,
+                partition_key=user_id
+            )
+            fav_movies = user_profile.get("favorite_movies", [])
+            if fav_movies:
+                lista_film_str = ", ".join(fav_movies)
+                contesto_preferiti = f"\n\n[INFORMAZIONI UTENTE]: I film preferiti dell'utente attuale sono: {lista_film_str}. Usa questa informazione per personalizzare i tuoi consigli o fare riferimenti se pertinente."
+        except Exception as e:
+            print(f"Nessun profilo trovato o errore nel recupero preferiti: {e}")
+
+        # Uniamo il system prompt con il contesto dei film preferiti
+        prompt_di_sistema_finale = (chat_document.get("system_prompt") or "") + contesto_preferiti
         
         if data.web_search:
             try:
@@ -142,7 +163,6 @@ def ask_model(data: ChatRequest, current_user: str = Depends(get_current_user)):
                     for script in soup(["script", "style"]):
                         script.extract()
                     testo_pulito = soup.get_text(separator=" ", strip=True)[:4000] # Tronca per stare nei limiti di token
-                    print("t pulito", soup.get_text)
                     
                     # Arricchiamo il system prompt temporaneo per questa chiamata
                     contesto_web = f"\n\n[CONTESTO AGGIUNTIVO DAL SITO {URL_FISSO}]:\n{testo_pulito}\n"
@@ -151,17 +171,12 @@ def ask_model(data: ChatRequest, current_user: str = Depends(get_current_user)):
                 # Logga l'errore o gestiscilo come preferisci; qui andiamo avanti senza bloccare la chat
                 print(f"Errore scraping backend: {e}")
 
-        # Costruzione della history per OpenAI
         history_for_openai = []
-        
-        # Se c'è un prompt di sistema (base o arricchito dal web), lo inseriamo all'inizio
         if prompt_di_sistema_finale:
             history_for_openai.append({
                 "role": "system",
                 "content": [{"type": "input_text", "text": prompt_di_sistema_finale}]
             })
-
-        
 
         for msg in chat_document["messages"]:
             content_type = "input_text" if msg["role"] == "user" else "output_text"
@@ -170,19 +185,11 @@ def ask_model(data: ChatRequest, current_user: str = Depends(get_current_user)):
                 "content": [{"type": content_type, "text": msg["content"]}]
             })
 
-        # Chiamata all'LLM
         answ = openai_connector.get_output_text(input=history_for_openai)
         chat_document["messages"].append({"role": "assistant", "content": answ})
 
-        # Salvataggio definitivo su Cosmos DB
         cosmos_connector.upsert_item(DATABASE_NAME, CONTAINER_NAME, chat_document)
-
-        return {
-            "success": True, 
-            "answer": answ, 
-            "session_id": session_id,
-            "messages": chat_document["messages"] 
-        }
+        return {"success": True, "answer": answ, "session_id": session_id, "messages": chat_document["messages"]}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -220,6 +227,59 @@ def get_chat_messages(user_id: str, session_id: str, current_user: str = Depends
         raise http_ex
     except Exception as e:
         return {"success": False, "error": str(e)}
+    
+@app.post("/update_profile")
+def update_profile(data: ProfileUpdateRequest, current_user: str = Depends(get_current_user)):
+    try:
+        # Usiamo direttamente 'current_user' (che contiene lo user_id validato dal JWT)
+        user_id = current_user
+        
+        # Recuperiamo il documento dell'utente dal container degli utenti
+        user_document = cosmos_connector.get_item(
+            database_name=DATABASE_NAME,
+            container_name=USER_CONTAINER_NAME,
+            item_id=user_id,
+            partition_key=user_id
+        )
+        
+        # Aggiorniamo il campo dei film preferiti
+        user_document["favorite_movies"] = data.favorite_movies
+        user_document["updatedAt"] = datetime.utcnow().isoformat() + "Z"
+        
+        # Salviamo nuovamente su Cosmos DB
+        cosmos_connector.upsert_item(
+            database_name=DATABASE_NAME,
+            container_name=USER_CONTAINER_NAME,
+            item=user_document
+        )
+        return {"success": True, "message": "Profilo aggiornato con successo"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.get("/get_profile")
+def get_profile(current_user: str = Depends(get_current_user)):
+    try:
+        user_id = current_user
+        
+        user_document = cosmos_connector.get_item(
+            database_name=DATABASE_NAME,
+            container_name=USER_CONTAINER_NAME,
+            item_id=user_id,
+            partition_key=user_id
+        )
+        
+        fav_movies = user_document.get("favorite_movies", [])
+        
+        return {
+            "success": True, 
+            "favorite_movies": fav_movies
+        } # errore e nel caso restituisco una lista vuota
+    except Exception as e:
+        return {
+            "success": False, 
+            "favorite_movies": [], 
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="127.0.0.1", port=8080, reload=True)

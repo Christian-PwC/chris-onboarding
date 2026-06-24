@@ -31,12 +31,26 @@ if st.session_state.access_token is None:
             if submit_login:
                 if username_input and password_input:
                     try:
-                        login_res = requests.post(f"{BASE_URL}/login", json={"user_id": username_input, "password": password_input}) # la password viaggia in chiaro???
+                        login_res = requests.post(f"{BASE_URL}/login", json={"user_id": username_input, "password": password_input})
                         if login_res.status_code == 200:
                             login_data = login_res.json()
                             if login_data.get("success"):
                                 st.session_state.access_token = login_data["access_token"]
                                 st.session_state.user_id = login_data["user_id"]
+                                
+                                headers_profilo = {"Authorization": f"Bearer {login_data['access_token']}"}
+                                try:
+                                    res_profile = requests.get(f"{BASE_URL}/get_profile", headers=headers_profilo)
+                                    if res_profile.status_code == 200:
+                                        profile_data = res_profile.json()
+                                        lista_film = profile_data.get("favorite_movies", [])
+                                        # Trasformiamo la lista in stringa separata da virgole per darla in pasto all'input
+                                        st.session_state.input_film_preferiti = ", ".join(lista_film)
+                                    else:
+                                        st.session_state.input_film_preferiti = ""
+                                except Exception:
+                                    st.session_state.input_film_preferiti = ""
+
                                 st.success("Login effettuato con successo!")
                                 st.rerun()
                             else:
@@ -79,7 +93,7 @@ if st.session_state.access_token is None:
                 else:
                     st.warning("Compila tutti i campi del modulo.")
                     
-    st.stop() 
+    st.stop()
 
 auth_headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
 
@@ -177,3 +191,45 @@ if user_question:
                 st.error(f"Errore server: {response.status_code}")
         except requests.exceptions.ConnectionError:
             st.error("Impossibile raggiungere il backend FastAPI.")
+
+st.write("---")
+if "input_film_preferiti" not in st.session_state:
+    st.session_state.input_film_preferiti = ""
+    # OPZIONALE: Se hai già salvato i film nel database, qui potresti fare una chiamata 
+    # GET a un endpoint del backend (es. /get_profile) per pre-popolare st.session_state.input_film_preferiti
+
+with st.expander("Modifica Profilo (Film Preferiti)"):
+    
+    if st.session_state.input_film_preferiti:
+        st.info(f"**Film attualmente salvati:** {st.session_state.input_film_preferiti}")
+    else:
+        st.info("Non hai ancora salvato nessun film preferito.")
+
+    film_input = st.text_input(
+        label="Modifica i tuoi film preferiti (separati da virgola):",
+        value=st.session_state.input_film_preferiti,
+        placeholder="Es: Matrix, Inception, Interstellar",
+        help="L'AI userà questa lista per conoscerti meglio e personalizzare le risposte."
+    )
+
+    if st.button("Salva Modifiche", use_container_width=True):
+        if film_input:
+            lista_film = [f.strip() for f in film_input.split(",") if f.strip()]
+            
+            # Mandiamo l'array dei film preferiti al backend
+            payload_profilo = {
+                "favorite_movies": lista_film
+            }
+            
+            try:
+                res_profilo = requests.post(f"{BASE_URL}/update_profile", json=payload_profilo, headers=auth_headers)
+                if res_profilo.status_code == 200 and res_profilo.json().get("success"):
+                    st.session_state.input_film_preferiti = film_input
+                    st.success("Preferenze salvate nel tuo profilo!")
+                    st.rerun() 
+                else:
+                    st.error(f"Errore durante il salvataggio: {res_profilo.json().get('error')}")
+            except Exception as e:
+                st.error(f"Impossibile connettersi al server: {e}")
+        else:
+            st.warning("Inserisci almeno un film prima di salvare.")
