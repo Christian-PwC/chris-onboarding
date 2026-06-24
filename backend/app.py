@@ -1,13 +1,15 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from src.services.openai_connector import openai_connector 
-from src.services.cosmos_connector import cosmos_connector  # Il tuo connettore Cosmos
+from src.services.cosmos_connector import cosmos_connector  
 from pydantic import BaseModel
 from datetime import datetime
 import uuid
 from src.models.schemas import ChatRequest, LoginRequest
 from src.services.auth_service import verify_password, create_access_token, decode_token, hash_password
 import uvicorn
+import requests
+from bs4 import BeautifulSoup
 
 
 app = FastAPI()
@@ -15,7 +17,8 @@ security_agent = HTTPBearer()
 
 DATABASE_NAME = "users"
 CONTAINER_NAME = "users_chat"
-USER_CONTAINER_NAME = "users_list"  # Container per salvare le credenziali utenti
+USER_CONTAINER_NAME = "users_list"  
+URL_FISSO = "https://www.mymovies.it/cinema/milano/"
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security_agent)) -> str:
@@ -33,31 +36,27 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 @app.post("/register")
 def register_user(credentials: LoginRequest):
     try:
-        # controllo se l'utente esiste già per evitare duplicati
         try:
             existing_user = cosmos_connector.get_item(
                 database_name=DATABASE_NAME,
                 container_name=USER_CONTAINER_NAME,
                 item_id=credentials.user_id,
-                partition_key=credentials.user_id  # La partizione è user_id
+                partition_key=credentials.user_id  
             )
             if existing_user:
                 return {"success": False, "error": "Questo User ID è già registrato."}
         except Exception:
             pass
 
-        # Hashiamo la password usando la funzione bcrypt dell'auth_service
         password_encrypted = hash_password(credentials.password)
 
-        # Creiamo il documento utente conforme a Cosmos DB
         user_document = {
-            "id": credentials.user_id,          # ID univoco
-            "user_id": credentials.user_id,     # Partition Key obbligatoria
+            "id": credentials.user_id,          
+            "user_id": credentials.user_id,     
             "password_hash": password_encrypted,
             "createdAt": datetime.utcnow().isoformat() + "Z"
         }
 
-        # Salviamo l'utente nel container dedicato
         cosmos_connector.upsert_item(
             database_name=DATABASE_NAME,
             container_name=USER_CONTAINER_NAME,
@@ -69,11 +68,9 @@ def register_user(credentials: LoginRequest):
         return {"success": False, "error": str(e)}
 
 
-# ENDPOINT AGGIORNATO: LOGIN REALE SU COSMOS
 @app.post("/login")
 def login(credentials: LoginRequest):
     try:
-        # Andiamo a prendere l'utente reale salvato su Cosmos DB
         try:
             user_document = cosmos_connector.get_item(
                 database_name=DATABASE_NAME,
@@ -84,10 +81,8 @@ def login(credentials: LoginRequest):
         except Exception:
             return {"success": False, "error": "User ID o Password errati (Utente non trovato)"}
         
-        # Estraiamo l'hash salvato nel documento
         db_hash = user_document.get("password_hash")
         
-        # Verifichiamo la password inserita con l'hash del DB
         if verify_password(credentials.password, db_hash):
             token = create_access_token(
                 user_id=credentials.user_id,
@@ -101,7 +96,9 @@ def login(credentials: LoginRequest):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-# STOP LOGIN!
+headers_browser = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
 
 @app.post("/ask")
 def ask_model(data: ChatRequest, current_user: str = Depends(get_current_user)):
@@ -109,39 +106,63 @@ def ask_model(data: ChatRequest, current_user: str = Depends(get_current_user)):
         user_id = data.user_id
         session_id = data.session_id
         if user_id != current_user:
-            raise HTTPException(status_code=403, detail="Non sei autorizzato ad accedere ai dati di un altro utente")
+            raise HTTPException(status_code=403, detail="Non sei autorizzato")
         
-        # se non viene passata una session_id, significa che è una NUOVA chat e crea un nuovo item nel cosmos
+        # Gestione recupero/creazione del documento chat (identica a prima)
         if not session_id:
             session_id = str(uuid.uuid4())
             chat_document = {
                 "id": session_id,
                 "user_id": user_id,
-                "title": data.question[:30] + "...", # inizio della domanda come titolo temporaneo
+                "title": data.question[:30] + "...", 
+                "system_prompt": data.system_prompt,
                 "messages": []
             }
         else:
-            # recupero la chat
             try:
-                chat_document = cosmos_connector.get_item(
-                    database_name=DATABASE_NAME,
-                    container_name=CONTAINER_NAME,
-                    item_id=session_id,
-                    partition_key=user_id
-                )
+                chat_document = cosmos_connector.get_item(DATABASE_NAME, CONTAINER_NAME, session_id, user_id)
+                chat_document["system_prompt"] = data.system_prompt 
             except Exception:
-                # se per qualche motivo il session_id non esiste, lo creiamo da zero
-                chat_document = {
-                    "id": session_id,
-                    "user_id": user_id,
-                    "title": data.question[:30] + "...",
-                    "messages": []
-                }
+                chat_document = {"id": session_id, "user_id": user_id, "title": data.question[:30] + "...", "system_prompt": data.system_prompt, "messages": []}
 
-        # metto il nuovo messaggio dell'utente nella cronologia
+        # Salva il messaggio dell'utente
         chat_document["messages"].append({"role": "user", "content": data.question})
 
+        # --- LOGICA DI SCRAPING LATO BACKEND ---
+        prompt_di_sistema_finale = chat_document.get("system_prompt") or ""
+        
+        if data.web_search:
+            try:
+                # Eseguiamo la chiamata HTTP (verify=False se hai problemi di certificati aziendali)
+                res_web = requests.get(URL_FISSO, timeout=15, headers = headers_browser)
+                # print("stat", res_web)
+                if res_web.status_code == 200:
+                    soup = BeautifulSoup(res_web.text, 'html.parser')
+                    # Pulizia dei tag inutili
+                    for script in soup(["script", "style"]):
+                        script.extract()
+                    testo_pulito = soup.get_text(separator=" ", strip=True)[:4000] # Tronca per stare nei limiti di token
+                    print("t pulito", soup.get_text)
+                    
+                    # Arricchiamo il system prompt temporaneo per questa chiamata
+                    contesto_web = f"\n\n[CONTESTO AGGIUNTIVO DAL SITO {URL_FISSO}]:\n{testo_pulito}\n"
+                    prompt_di_sistema_finale += contesto_web
+            except Exception as e:
+                # Logga l'errore o gestiscilo come preferisci; qui andiamo avanti senza bloccare la chat
+                print(f"Errore scraping backend: {e}")
+
+        # Costruzione della history per OpenAI
         history_for_openai = []
+        
+        # Se c'è un prompt di sistema (base o arricchito dal web), lo inseriamo all'inizio
+        if prompt_di_sistema_finale:
+            history_for_openai.append({
+                "role": "system",
+                "content": [{"type": "input_text", "text": prompt_di_sistema_finale}]
+            })
+
+        
+
         for msg in chat_document["messages"]:
             content_type = "input_text" if msg["role"] == "user" else "output_text"
             history_for_openai.append({
@@ -149,15 +170,12 @@ def ask_model(data: ChatRequest, current_user: str = Depends(get_current_user)):
                 "content": [{"type": content_type, "text": msg["content"]}]
             })
 
+        # Chiamata all'LLM
         answ = openai_connector.get_output_text(input=history_for_openai)
         chat_document["messages"].append({"role": "assistant", "content": answ})
 
-        # 5. Salviamo la chat aggiornata su Cosmos DB
-        cosmos_connector.upsert_item(
-            database_name=DATABASE_NAME,
-            container_name=CONTAINER_NAME,
-            item=chat_document
-        )
+        # Salvataggio definitivo su Cosmos DB
+        cosmos_connector.upsert_item(DATABASE_NAME, CONTAINER_NAME, chat_document)
 
         return {
             "success": True, 
@@ -165,8 +183,6 @@ def ask_model(data: ChatRequest, current_user: str = Depends(get_current_user)):
             "session_id": session_id,
             "messages": chat_document["messages"] 
         }
-    except HTTPException as http_ex:
-        raise http_ex
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -193,7 +209,13 @@ def get_chat_messages(user_id: str, session_id: str, current_user: str = Depends
         if user_id != current_user:
             raise HTTPException(status_code=403, detail="Accesso negato")
         chat = cosmos_connector.get_item(DATABASE_NAME, CONTAINER_NAME, session_id, user_id)
-        return {"success": True, "messages": chat.get("messages", [])}
+        
+        # <-- MODIFICATO: Restituisce anche il system_prompt oltre ai messaggi
+        return {
+            "success": True, 
+            "messages": chat.get("messages", []),
+            "system_prompt": chat.get("system_prompt", "") 
+        }
     except HTTPException as http_ex:
         raise http_ex
     except Exception as e:

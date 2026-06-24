@@ -11,13 +11,14 @@ if "access_token" not in st.session_state:
 if "user_id" not in st.session_state:
     st.session_state.user_id = None 
 if "current_session_id" not in st.session_state:
-    st.session_state.current_session_id = None    # nessuna chat selezionata
+    st.session_state.current_session_id = None    
 if "chat_messages" not in st.session_state:
-    st.session_state.chat_messages = []           # messaggi chat corrente
+    st.session_state.chat_messages = []           
+if "system_prompt" not in st.session_state:        # <-- INIZIALIZZAZIONE DELLO STATO DEL PROMPT
+    st.session_state.system_prompt = ""
 
-# Se l'utente non è loggato, mostra la schermata di Login / Registrazione
+# Schermata Login / Registrazione
 if st.session_state.access_token is None:
-    # Creiamo due tab: uno per il Login e uno per la Registrazione
     tab_login, tab_register = st.tabs(["🔐 Accedi", "📝 Registrati"])
     
     with tab_login:
@@ -30,7 +31,7 @@ if st.session_state.access_token is None:
             if submit_login:
                 if username_input and password_input:
                     try:
-                        login_res = requests.post(f"{BASE_URL}/login", json={"user_id": username_input, "password": password_input})
+                        login_res = requests.post(f"{BASE_URL}/login", json={"user_id": username_input, "password": password_input}) # la password viaggia in chiaro???
                         if login_res.status_code == 200:
                             login_data = login_res.json()
                             if login_data.get("success"):
@@ -61,7 +62,6 @@ if st.session_state.access_token is None:
                         st.error("Le password non coincidono.")
                     else:
                         try:
-                            # Chiamata al nuovo endpoint di registrazione del backend
                             reg_res = requests.post(
                                 f"{BASE_URL}/register", 
                                 json={"user_id": new_username, "password": new_password}
@@ -79,28 +79,30 @@ if st.session_state.access_token is None:
                 else:
                     st.warning("Compila tutti i campi del modulo.")
                     
-    st.stop() # Interrompe l'esecuzione del resto della pagina se non loggato
+    st.stop() 
 
-# Configurazione header di sicurezza per tutte le richieste protette
 auth_headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
 
-# Pulsante di Logout inserito in alto a destra
 if st.sidebar.button("🚪 Logout", use_container_width=True):
     st.session_state.access_token = None
     st.session_state.user_id = None
     st.session_state.current_session_id = None
     st.session_state.chat_messages = []
+    st.session_state.system_prompt = ""
     st.rerun()
 
-# --- BLOCCO LOGICA ORIGINALE CHAT ---
-# [Il resto del tuo codice frontend Streamlit rimane esattamente identico a prima]
+# --- LOGICA SIDEBAR CHAT E PROMPT ---
 with st.sidebar:
     st.header(f"Utente: {st.session_state.user_id}")
     if st.button("Nuova Chat", use_container_width=True):
         st.session_state.current_session_id = None
         st.session_state.chat_messages = []
+        st.session_state.system_prompt = ""        # <-- RESETTA IL PROMPT SUL NUOVO AVVIO CHAT
         st.rerun()
+    
     st.write("---")
+    
+
     st.subheader("Le tue conversazioni:")
     try:
         hist_response = requests.get(f"{BASE_URL}/history/{st.session_state.user_id}", headers=auth_headers)
@@ -109,15 +111,30 @@ with st.sidebar:
             for chat in history:
                 if st.button(chat["title"], key=chat["id"], use_container_width=True):
                     st.session_state.current_session_id = chat["id"]
-                    msg_res = requests.get(f"{BASE_URL}/chat/{st.session_state.user_id}/{chat['id']}", headers=auth_headers) # richiesta al backend che mi ridà i mess della vecchia chat
+                    msg_res = requests.get(f"{BASE_URL}/chat/{st.session_state.user_id}/{chat['id']}", headers=auth_headers) 
                     if msg_res.status_code == 200 and msg_res.json()["success"]:
                         st.session_state.chat_messages = msg_res.json()["messages"]
+                        # <-- AGGIUNTO: Carica il system prompt associato alla chat selezionata
+                        st.session_state.system_prompt = msg_res.json().get("system_prompt", "")
                     st.rerun()
         else:
-            st.caption("Nessuna cronologia trouvata.")
+            st.caption("Nessuna cronologia trovata.")
     except Exception:
         st.error("Errore di connessione per la cronologia.")
 
+    st.write("---")
+
+    st.subheader("⚙️ Impostazioni AI")
+    st.session_state.system_prompt = st.text_area(
+        label="System Prompt",
+        value=st.session_state.system_prompt,
+        placeholder="Es: Sei un assistente HR formale. Rispondi brevemente...",
+        help="Questo testo istruisce il modello sul comportamento da adottare nella conversazione.",
+        height=120
+    )
+    
+
+# Visualizzazione dei messaggi
 if st.session_state.chat_messages:
     for msg in st.session_state.chat_messages:
         if msg["role"] == "user":
@@ -125,14 +142,25 @@ if st.session_state.chat_messages:
         else:
             st.chat_message("assistant").write(msg["content"])
 
+# 1. Definisci il toggle assegnandogli una 'key' univoca
+st.sidebar.toggle("🌐 Attiva ricerca su pagina fissa", key="web_search_toggle")
+
 user_question = st.chat_input("Inserisci la tua domanda...")
 if user_question:
     st.chat_message("user").write(user_question)
+    
+    # 2. Recupera il valore direttamente dal session_state per essere sicuri al 100%
+    stato_web = st.session_state.web_search_toggle
+    
+    # Costruzione del payload con il flag stabile
     payload = {
         "user_id": st.session_state.user_id,
         "session_id": st.session_state.current_session_id,
-        "question": user_question
+        "question": user_question,
+        "system_prompt": st.session_state.system_prompt,
+        "web_search": stato_web  # <-- Passiamo il valore estratto dal session_state
     }
+    
     with st.spinner("Il modello sta rispondendo..."):
         try:
             response = requests.post(f"{BASE_URL}/ask", json=payload, headers=auth_headers)
