@@ -78,8 +78,4 @@ dependencies = [
     "zstandard==0.25.0",
 ]
 
-[tool.uv.workspace]
-members = [
-    "backend",
-    "frontend",
-]
+

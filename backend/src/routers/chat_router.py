@@ -142,3 +142,22 @@ def get_chat_messages(user_id: str, session_id: str, current_user: str = Depends
         raise http_ex
     except Exception as e:
         return {"success": False, "error": str(e)}
+    
+@router.delete("/chat/{user_id}/{session_id}")
+def delete_chat(user_id: str, session_id: str, current_user: str = Depends(get_current_user)):
+    try:
+        if user_id != current_user:
+            raise HTTPException(status_code=403, detail="Accesso negato")
+            
+        # Elimina il documento dal container di Cosmos DB
+        cosmos_connector.delete_item(
+            database_name=DATABASE_NAME,
+            container_name=CONTAINER_NAME,
+            item_id=session_id,
+            partition_key=user_id
+        )
+        return {"success": True, "message": "Chat eliminata con successo"}
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        return {"success": False, "error": str(e)}

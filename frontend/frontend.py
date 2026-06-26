@@ -122,15 +122,38 @@ with st.sidebar:
         hist_response = requests.get(f"{BASE_URL}/history/{st.session_state.user_id}", headers=auth_headers)
         if hist_response.status_code == 200 and hist_response.json()["success"]:
             history = hist_response.json()["history"]
+            
             for chat in history:
-                if st.button(chat["title"], key=chat["id"], use_container_width=True):
-                    st.session_state.current_session_id = chat["id"]
-                    msg_res = requests.get(f"{BASE_URL}/chat/{st.session_state.user_id}/{chat['id']}", headers=auth_headers) 
-                    if msg_res.status_code == 200 and msg_res.json()["success"]:
-                        st.session_state.chat_messages = msg_res.json()["messages"]
-                        # <-- AGGIUNTO: Carica il system prompt associato alla chat selezionata
-                        st.session_state.system_prompt = msg_res.json().get("system_prompt", "")
-                    st.rerun()
+                # Creiamo due colonne: una larga per il titolo della chat, una stretta per il cestino
+                col_chat_btn, col_del_btn = st.columns([6, 1.5], vertical_alignment="center")
+                
+                with col_chat_btn:
+                    if st.button(chat["title"], key=f"btn_{chat['id']}", use_container_width=True):
+                        st.session_state.current_session_id = chat["id"]
+                        msg_res = requests.get(f"{BASE_URL}/chat/{st.session_state.user_id}/{chat['id']}", headers=auth_headers) 
+                        if msg_res.status_code == 200 and msg_res.json()["success"]:
+                            st.session_state.chat_messages = msg_res.json()["messages"]
+                            st.session_state.system_prompt = msg_res.json().get("system_prompt", "")
+                        st.rerun()
+                
+                with col_del_btn:
+                    if st.button("🗑️", key=f"del_{chat['id']}", help="Elimina questa chat", use_container_width=True):
+                        try:
+                            # Chiamata DELETE al backend
+                            del_res = requests.delete(f"{BASE_URL}/chat/{st.session_state.user_id}/{chat['id']}", headers=auth_headers)
+                            if del_res.status_code == 200 and del_res.json().get("success"):
+                                # Se la chat eliminata era quella correntemente aperta, resettiamo lo stato dello schermo
+                                if st.session_state.current_session_id == chat["id"]:
+                                    st.session_state.current_session_id = None
+                                    st.session_state.chat_messages = []
+                                    st.session_state.system_prompt = ""
+                                
+                                st.toast("Chat eliminata!", icon="🗑️")
+                                st.rerun()
+                            else:
+                                st.error("Impossibile eliminare.")
+                        except Exception as e:
+                            st.error(f"Errore: {e}")
         else:
             st.caption("Nessuna cronologia trovata.")
     except Exception:
