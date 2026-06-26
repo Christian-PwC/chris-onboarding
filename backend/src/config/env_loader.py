@@ -23,5 +23,7 @@ class Settings(BaseSettings):
     CHAT_CONTAINER_NAME: str = "users_chat"
     LINK: str = "https://www.mymovies.it/cinema/milano/"
 
+    DEBUG: bool = True
+
 load_dotenv(dotenv_path="../.env")
 env = Settings()
