@@ -14,7 +14,7 @@ if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = None    
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []           
-if "system_prompt" not in st.session_state:        # <-- INIZIALIZZAZIONE DELLO STATO DEL PROMPT
+if "system_prompt" not in st.session_state:        
     st.session_state.system_prompt = ""
 
 # Schermata Login / Registrazione
@@ -22,7 +22,7 @@ if st.session_state.access_token is None:
     tab_login, tab_register = st.tabs(["🔐 Accedi", "📝 Registrati"])
     
     with tab_login:
-        st.subheader("Login Accesso Piattaforma")
+        st.subheader("Login")
         with st.form("login_form"):
             username_input = st.text_input("User ID")
             password_input = st.text_input("Password", type="password")
@@ -138,11 +138,11 @@ with st.sidebar:
 
     st.write("---")
 
-    st.subheader("⚙️ Impostazioni AI")
+    st.subheader("⚙️ Impostazioni")
     st.session_state.system_prompt = st.text_area(
         label="System Prompt",
         value=st.session_state.system_prompt,
-        placeholder="Es: Sei un assistente HR formale. Rispondi brevemente...",
+        placeholder="Es: Sei un chatbot che sa tutto di cinema e dà consigli cinematografici. Non essere troppo prolisso ma neanche troppo coinciso...",
         help="Questo testo istruisce il modello sul comportamento da adottare nella conversazione.",
         height=120
     )
@@ -157,7 +157,7 @@ if st.session_state.chat_messages:
             st.chat_message("assistant").write(msg["content"])
 
 # 1. Definisci il toggle assegnandogli una 'key' univoca
-st.sidebar.toggle("🌐 Attiva ricerca su pagina fissa", key="web_search_toggle")
+st.sidebar.toggle("🌐 Programmazione in sala", key="web_search_toggle")
 
 user_question = st.chat_input("Inserisci la tua domanda...")
 if user_question:
@@ -195,10 +195,8 @@ if user_question:
 st.write("---")
 if "input_film_preferiti" not in st.session_state:
     st.session_state.input_film_preferiti = ""
-    # OPZIONALE: Se hai già salvato i film nel database, qui potresti fare una chiamata 
-    # GET a un endpoint del backend (es. /get_profile) per pre-popolare st.session_state.input_film_preferiti
 
-with st.expander("Modifica Profilo (Film Preferiti)"):
+with st.expander("Modifica Profilo"):
     
     if st.session_state.input_film_preferiti:
         st.info(f"**Film attualmente salvati:** {st.session_state.input_film_preferiti}")
