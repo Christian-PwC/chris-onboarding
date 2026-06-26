@@ -1,19 +1,31 @@
+# app.py
 from fastapi import FastAPI
-from src.services.openai_connector import openai_connector 
-from src.models.schemas import QuestionRequest
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from src.routers import auth_router, chat_router, user_router
 
+app = FastAPI(
+    title="OnBoarding API", 
+    description="Cinema Chatbot for Onboarding",
+    version="1.0.0"
+)
 
+# Configurazione CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-app = FastAPI()
+app.include_router(auth_router.router)
+app.include_router(chat_router.router)
+app.include_router(user_router.router)
 
-@app.post("/ask")
-def ask_model(data: QuestionRequest):
-    try:
-        answ = openai_connector.get_output_text(data.question)
-        return {"success": True, "answer": answ}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+@app.get("/")
+def read_root():
+    return {"status": "running", "message": "Welcome in the OnBoarding chatbot API"}
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="127.0.0.1", port=8080)
+    uvicorn.run("app:app", host="127.0.0.1", port=8080, reload=True)
