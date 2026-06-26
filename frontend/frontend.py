@@ -1,10 +1,11 @@
 import streamlit as st
 import requests
+from env_loader import env
 
 st.set_page_config(layout="wide")
 st.title("OnBoarding ChatBot")
 
-BASE_URL = "http://127.0.0.1:8080"
+BASE_URL = env.BACKEND_URL
 
 if "access_token" not in st.session_state:
     st.session_state.access_token = None

@@ -7,11 +7,10 @@ from src.models.schemas import ChatRequest
 from src.dependencies.auth import get_current_user
 from src.services.openai_connector import openai_connector 
 from src.services.cosmos_connector import cosmos_connector  
-from src.config.env_loader import Settings
+from src.config.env_loader import env
 from src.prompts.prompts import BASE_SYSTEM_PROMPT
 
 
-env = Settings()
 DATABASE_NAME = env.DATABASE_NAME
 CONTAINER_NAME = env.CHAT_CONTAINER_NAME
 USER_CONTAINER_NAME = env.USER_CONTAINER_NAME 
