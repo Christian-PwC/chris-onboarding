@@ -7,11 +7,14 @@ from src.models.schemas import ChatRequest
 from src.dependencies.auth import get_current_user
 from src.services.openai_connector import openai_connector 
 from src.services.cosmos_connector import cosmos_connector  
+from src.config.env_loader import env
+from src.prompts.prompts import BASE_SYSTEM_PROMPT
 
-DATABASE_NAME = "users"
-CONTAINER_NAME = "users_chat"
-USER_CONTAINER_NAME = "users_list"  
-URL_FISSO = "https://www.mymovies.it/cinema/milano/"
+
+DATABASE_NAME = env.DATABASE_NAME
+CONTAINER_NAME = env.CHAT_CONTAINER_NAME
+USER_CONTAINER_NAME = env.USER_CONTAINER_NAME 
+URL_FISSO = env.LINK
 
 headers_browser = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -66,7 +69,7 @@ def ask_model(data: ChatRequest, current_user: str = Depends(get_current_user)):
         except Exception as e:
             print(f"Nessun profilo trovato o errore nel recupero preferiti: {e}")
 
-        prompt_di_sistema_finale = (chat_document.get("system_prompt") or "") + contesto_preferiti
+        prompt_di_sistema_finale = (chat_document.get("system_prompt") or BASE_SYSTEM_PROMPT) + contesto_preferiti
         
         if data.web_search:
             try:
@@ -132,8 +135,27 @@ def get_chat_messages(user_id: str, session_id: str, current_user: str = Depends
         return {
             "success": True, 
             "messages": chat.get("messages", []),
-            "system_prompt": chat.get("system_prompt", "") 
+            "system_prompt": chat.get("system_prompt", BASE_SYSTEM_PROMPT) 
         }
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    
+@router.delete("/chat/{user_id}/{session_id}")
+def delete_chat(user_id: str, session_id: str, current_user: str = Depends(get_current_user)):
+    try:
+        if user_id != current_user:
+            raise HTTPException(status_code=403, detail="Accesso negato")
+            
+        # Elimina il documento dal container di Cosmos DB
+        cosmos_connector.delete_item(
+            database_name=DATABASE_NAME,
+            container_name=CONTAINER_NAME,
+            item_id=session_id,
+            partition_key=user_id
+        )
+        return {"success": True, "message": "Chat eliminata con successo"}
     except HTTPException as http_ex:
         raise http_ex
     except Exception as e:

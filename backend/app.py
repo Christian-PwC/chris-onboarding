@@ -3,11 +3,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from src.routers import auth_router, chat_router, user_router
+from src.config.env_loader import env
 
 app = FastAPI(
     title="OnBoarding API", 
     description="Cinema Chatbot for Onboarding",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs" if env.DEBUG else None,
+    redoc_url="/redoc" if env.DEBUG else None
 )
 
 # Configurazione CORS

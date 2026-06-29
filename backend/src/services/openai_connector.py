@@ -14,7 +14,6 @@ class OpenAIConnector:
         self._client = OpenAI(
             base_url=env.AZURE_LLM_ENDPOINT,
             api_key=env.AZURE_LLM_KEY,
-            http_client=httpx.Client(verify=False),  # bypass certificato aziendale
         )
         self._model = env.AZURE_LLM_MODEL_NAME
 

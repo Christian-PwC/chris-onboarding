@@ -4,9 +4,10 @@ from datetime import datetime
 from src.models.schemas import ProfileUpdateRequest
 from src.dependencies.auth import get_current_user
 from src.services.cosmos_connector import cosmos_connector  
+from src.config.env_loader import env
 
-DATABASE_NAME = "users"
-USER_CONTAINER_NAME = "users_list"
+DATABASE_NAME = env.DATABASE_NAME
+USER_CONTAINER_NAME = env.USER_CONTAINER_NAME
 
 router = APIRouter(
     tags=["User Profile"]

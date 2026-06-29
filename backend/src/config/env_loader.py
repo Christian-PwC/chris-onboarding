@@ -18,5 +18,12 @@ class Settings(BaseSettings):
     JWT_ACCESS_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_EXPIRE_DAYS: int = 7
 
+    DATABASE_NAME: str= "users"
+    USER_CONTAINER_NAME: str = "users_list"
+    CHAT_CONTAINER_NAME: str = "users_chat"
+    LINK: str = "https://www.mymovies.it/cinema/milano/"
+
+    DEBUG: bool = False
+
 load_dotenv(dotenv_path="../.env")
 env = Settings()

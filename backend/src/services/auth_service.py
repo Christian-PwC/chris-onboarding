@@ -11,11 +11,10 @@ from typing import List
 import bcrypt
 from jose import jwt
 
-from src.config.env_loader import Settings
+from src.config.env_loader import env
 from src.models.auth_models import TokenPayload
 
 
-env = Settings()
 
 
 def _to_bcrypt_bytes(password: str) -> bytes:

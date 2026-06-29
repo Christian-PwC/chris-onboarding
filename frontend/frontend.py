@@ -1,10 +1,12 @@
 import streamlit as st
 import requests
+import time
+from env_loader import env
 
 st.set_page_config(layout="wide")
 st.title("OnBoarding ChatBot")
 
-BASE_URL = "http://127.0.0.1:8080"
+BASE_URL = env.BACKEND_URL
 
 if "access_token" not in st.session_state:
     st.session_state.access_token = None
@@ -14,7 +16,7 @@ if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = None    
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []           
-if "system_prompt" not in st.session_state:        # <-- INIZIALIZZAZIONE DELLO STATO DEL PROMPT
+if "system_prompt" not in st.session_state:        
     st.session_state.system_prompt = ""
 
 # Schermata Login / Registrazione
@@ -22,7 +24,7 @@ if st.session_state.access_token is None:
     tab_login, tab_register = st.tabs(["🔐 Accedi", "📝 Registrati"])
     
     with tab_login:
-        st.subheader("Login Accesso Piattaforma")
+        st.subheader("Login")
         with st.form("login_form"):
             username_input = st.text_input("User ID")
             password_input = st.text_input("Password", type="password")
@@ -44,14 +46,16 @@ if st.session_state.access_token is None:
                                     if res_profile.status_code == 200:
                                         profile_data = res_profile.json()
                                         lista_film = profile_data.get("favorite_movies", [])
-                                        # Trasformiamo la lista in stringa separata da virgole per darla in pasto all'input
                                         st.session_state.input_film_preferiti = ", ".join(lista_film)
                                     else:
                                         st.session_state.input_film_preferiti = ""
                                 except Exception:
                                     st.session_state.input_film_preferiti = ""
 
-                                st.success("Login effettuato con successo!")
+                                # Mostra la notifica DIRETTAMENTE qui nella pagina di login
+                                st.success("Login avvenuto con successo!")
+                                # Attende 1 secondo per dare il tempo all'utente di vederla prima di cambiare schermata
+                                time.sleep(1)
                                 st.rerun()
                             else:
                                 st.error(f"Errore: {login_data.get('error')}")
@@ -111,26 +115,45 @@ with st.sidebar:
     if st.button("Nuova Chat", use_container_width=True):
         st.session_state.current_session_id = None
         st.session_state.chat_messages = []
-        st.session_state.system_prompt = ""        # <-- RESETTA IL PROMPT SUL NUOVO AVVIO CHAT
+        st.session_state.system_prompt = ""        
         st.rerun()
     
     st.write("---")
     
-
     st.subheader("Le tue conversazioni:")
     try:
         hist_response = requests.get(f"{BASE_URL}/history/{st.session_state.user_id}", headers=auth_headers)
         if hist_response.status_code == 200 and hist_response.json()["success"]:
             history = hist_response.json()["history"]
+            
             for chat in history:
-                if st.button(chat["title"], key=chat["id"], use_container_width=True):
-                    st.session_state.current_session_id = chat["id"]
-                    msg_res = requests.get(f"{BASE_URL}/chat/{st.session_state.user_id}/{chat['id']}", headers=auth_headers) 
-                    if msg_res.status_code == 200 and msg_res.json()["success"]:
-                        st.session_state.chat_messages = msg_res.json()["messages"]
-                        # <-- AGGIUNTO: Carica il system prompt associato alla chat selezionata
-                        st.session_state.system_prompt = msg_res.json().get("system_prompt", "")
-                    st.rerun()
+                col_chat_btn, col_del_btn = st.columns([6, 1.5], vertical_alignment="center")
+                
+                with col_chat_btn:
+                    if st.button(chat["title"], key=f"btn_{chat['id']}", use_container_width=True):
+                        st.session_state.current_session_id = chat["id"]
+                        msg_res = requests.get(f"{BASE_URL}/chat/{st.session_state.user_id}/{chat['id']}", headers=auth_headers) 
+                        if msg_res.status_code == 200 and msg_res.json()["success"]:
+                            st.session_state.chat_messages = msg_res.json()["messages"]
+                            st.session_state.system_prompt = msg_res.json().get("system_prompt", "")
+                        st.rerun()
+                
+                with col_del_btn:
+                    if st.button("🗑️", key=f"del_{chat['id']}", help="Elimina questa chat", use_container_width=True):
+                        try:
+                            del_res = requests.delete(f"{BASE_URL}/chat/{st.session_state.user_id}/{chat['id']}", headers=auth_headers)
+                            if del_res.status_code == 200 and del_res.json().get("success"):
+                                if st.session_state.current_session_id == chat["id"]:
+                                    st.session_state.current_session_id = None
+                                    st.session_state.chat_messages = []
+                                    st.session_state.system_prompt = ""
+                                
+                                st.toast("Chat eliminata!", icon="🗑️")
+                                st.rerun()
+                            else:
+                                st.error("Impossibile eliminare.")
+                        except Exception as e:
+                            st.error(f"Errore: {e}")
         else:
             st.caption("Nessuna cronologia trovata.")
     except Exception:
@@ -138,15 +161,14 @@ with st.sidebar:
 
     st.write("---")
 
-    st.subheader("⚙️ Impostazioni AI")
+    st.subheader("⚙️ Impostazioni")
     st.session_state.system_prompt = st.text_area(
         label="System Prompt",
         value=st.session_state.system_prompt,
-        placeholder="Es: Sei un assistente HR formale. Rispondi brevemente...",
+        placeholder="Sei un chatbot che sa tutto di cinema e dà consigli cinematografici, rispondi alle domande dell'utente. Non essere troppo prolisso ma neanche troppo coinciso...",
         help="Questo testo istruisce il modello sul comportamento da adottare nella conversazione.",
         height=120
     )
-    
 
 # Visualizzazione dei messaggi
 if st.session_state.chat_messages:
@@ -156,23 +178,20 @@ if st.session_state.chat_messages:
         else:
             st.chat_message("assistant").write(msg["content"])
 
-# 1. Definisci il toggle assegnandogli una 'key' univoca
-st.sidebar.toggle("🌐 Attiva ricerca su pagina fissa", key="web_search_toggle")
+st.sidebar.toggle("🌐 Programmazione in sala", key="web_search_toggle")
 
 user_question = st.chat_input("Inserisci la tua domanda...")
 if user_question:
     st.chat_message("user").write(user_question)
     
-    # 2. Recupera il valore direttamente dal session_state per essere sicuri al 100%
     stato_web = st.session_state.web_search_toggle
     
-    # Costruzione del payload con il flag stabile
     payload = {
         "user_id": st.session_state.user_id,
         "session_id": st.session_state.current_session_id,
         "question": user_question,
         "system_prompt": st.session_state.system_prompt,
-        "web_search": stato_web  # <-- Passiamo il valore estratto dal session_state
+        "web_search": stato_web  
     }
     
     with st.spinner("Il modello sta rispondendo..."):
@@ -195,11 +214,8 @@ if user_question:
 st.write("---")
 if "input_film_preferiti" not in st.session_state:
     st.session_state.input_film_preferiti = ""
-    # OPZIONALE: Se hai già salvato i film nel database, qui potresti fare una chiamata 
-    # GET a un endpoint del backend (es. /get_profile) per pre-popolare st.session_state.input_film_preferiti
 
-with st.expander("Modifica Profilo (Film Preferiti)"):
-    
+with st.expander("Modifica Profilo"):
     if st.session_state.input_film_preferiti:
         st.info(f"**Film attualmente salvati:** {st.session_state.input_film_preferiti}")
     else:
@@ -215,8 +231,6 @@ with st.expander("Modifica Profilo (Film Preferiti)"):
     if st.button("Salva Modifiche", use_container_width=True):
         if film_input:
             lista_film = [f.strip() for f in film_input.split(",") if f.strip()]
-            
-            # Mandiamo l'array dei film preferiti al backend
             payload_profilo = {
                 "favorite_movies": lista_film
             }

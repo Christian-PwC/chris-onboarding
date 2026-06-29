@@ -4,9 +4,10 @@ from datetime import datetime
 from src.models.schemas import LoginRequest
 from src.services.cosmos_connector import cosmos_connector  
 from src.services.auth_service import verify_password, create_access_token, hash_password
+from src.config.env_loader import env
 
-DATABASE_NAME = "users"
-USER_CONTAINER_NAME = "users_list"
+DATABASE_NAME = env.DATABASE_NAME
+USER_CONTAINER_NAME = env.USER_CONTAINER_NAME
 
 router = APIRouter(
     tags=["Authentication"]
