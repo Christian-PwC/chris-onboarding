@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import time
 from env_loader import env
 
 st.set_page_config(layout="wide")
@@ -45,14 +46,16 @@ if st.session_state.access_token is None:
                                     if res_profile.status_code == 200:
                                         profile_data = res_profile.json()
                                         lista_film = profile_data.get("favorite_movies", [])
-                                        # Trasformiamo la lista in stringa separata da virgole per darla in pasto all'input
                                         st.session_state.input_film_preferiti = ", ".join(lista_film)
                                     else:
                                         st.session_state.input_film_preferiti = ""
                                 except Exception:
                                     st.session_state.input_film_preferiti = ""
 
-                                st.success("Login effettuato con successo!")
+                                # Mostra la notifica DIRETTAMENTE qui nella pagina di login
+                                st.success("Login avvenuto con successo!")
+                                # Attende 1 secondo per dare il tempo all'utente di vederla prima di cambiare schermata
+                                time.sleep(1)
                                 st.rerun()
                             else:
                                 st.error(f"Errore: {login_data.get('error')}")
@@ -112,12 +115,11 @@ with st.sidebar:
     if st.button("Nuova Chat", use_container_width=True):
         st.session_state.current_session_id = None
         st.session_state.chat_messages = []
-        st.session_state.system_prompt = ""        # <-- RESETTA IL PROMPT SUL NUOVO AVVIO CHAT
+        st.session_state.system_prompt = ""        
         st.rerun()
     
     st.write("---")
     
-
     st.subheader("Le tue conversazioni:")
     try:
         hist_response = requests.get(f"{BASE_URL}/history/{st.session_state.user_id}", headers=auth_headers)
@@ -125,7 +127,6 @@ with st.sidebar:
             history = hist_response.json()["history"]
             
             for chat in history:
-                # Creiamo due colonne: una larga per il titolo della chat, una stretta per il cestino
                 col_chat_btn, col_del_btn = st.columns([6, 1.5], vertical_alignment="center")
                 
                 with col_chat_btn:
@@ -140,10 +141,8 @@ with st.sidebar:
                 with col_del_btn:
                     if st.button("🗑️", key=f"del_{chat['id']}", help="Elimina questa chat", use_container_width=True):
                         try:
-                            # Chiamata DELETE al backend
                             del_res = requests.delete(f"{BASE_URL}/chat/{st.session_state.user_id}/{chat['id']}", headers=auth_headers)
                             if del_res.status_code == 200 and del_res.json().get("success"):
-                                # Se la chat eliminata era quella correntemente aperta, resettiamo lo stato dello schermo
                                 if st.session_state.current_session_id == chat["id"]:
                                     st.session_state.current_session_id = None
                                     st.session_state.chat_messages = []
@@ -166,11 +165,10 @@ with st.sidebar:
     st.session_state.system_prompt = st.text_area(
         label="System Prompt",
         value=st.session_state.system_prompt,
-        placeholder="Es: Sei un chatbot che sa tutto di cinema e dà consigli cinematografici. Non essere troppo prolisso ma neanche troppo coinciso...",
+        placeholder="Sei un chatbot che sa tutto di cinema e dà consigli cinematografici, rispondi alle domande dell'utente. Non essere troppo prolisso ma neanche troppo coinciso...",
         help="Questo testo istruisce il modello sul comportamento da adottare nella conversazione.",
         height=120
     )
-    
 
 # Visualizzazione dei messaggi
 if st.session_state.chat_messages:
@@ -180,23 +178,20 @@ if st.session_state.chat_messages:
         else:
             st.chat_message("assistant").write(msg["content"])
 
-# 1. Definisci il toggle assegnandogli una 'key' univoca
 st.sidebar.toggle("🌐 Programmazione in sala", key="web_search_toggle")
 
 user_question = st.chat_input("Inserisci la tua domanda...")
 if user_question:
     st.chat_message("user").write(user_question)
     
-    # 2. Recupera il valore direttamente dal session_state per essere sicuri al 100%
     stato_web = st.session_state.web_search_toggle
     
-    # Costruzione del payload con il flag stabile
     payload = {
         "user_id": st.session_state.user_id,
         "session_id": st.session_state.current_session_id,
         "question": user_question,
         "system_prompt": st.session_state.system_prompt,
-        "web_search": stato_web  # <-- Passiamo il valore estratto dal session_state
+        "web_search": stato_web  
     }
     
     with st.spinner("Il modello sta rispondendo..."):
@@ -221,7 +216,6 @@ if "input_film_preferiti" not in st.session_state:
     st.session_state.input_film_preferiti = ""
 
 with st.expander("Modifica Profilo"):
-    
     if st.session_state.input_film_preferiti:
         st.info(f"**Film attualmente salvati:** {st.session_state.input_film_preferiti}")
     else:
@@ -237,8 +231,6 @@ with st.expander("Modifica Profilo"):
     if st.button("Salva Modifiche", use_container_width=True):
         if film_input:
             lista_film = [f.strip() for f in film_input.split(",") if f.strip()]
-            
-            # Mandiamo l'array dei film preferiti al backend
             payload_profilo = {
                 "favorite_movies": lista_film
             }
