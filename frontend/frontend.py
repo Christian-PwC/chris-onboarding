@@ -7,6 +7,9 @@ st.set_page_config(layout="wide")
 st.title("OnBoarding ChatBot")
 
 BASE_URL = env.BACKEND_URL
+X_TOKEN_VALUE = env.X_TOKEN
+
+frontend_headers = {"X-Token": X_TOKEN_VALUE}
 
 if "access_token" not in st.session_state:
     st.session_state.access_token = None
@@ -33,14 +36,23 @@ if st.session_state.access_token is None:
             if submit_login:
                 if username_input and password_input:
                     try:
-                        login_res = requests.post(f"{BASE_URL}/login", json={"user_id": username_input, "password": password_input})
+                        # AGGIUNTO: headers=frontend_headers
+                        login_res = requests.post(
+                            f"{BASE_URL}/login", 
+                            json={"user_id": username_input, "password": password_input},
+                            headers=frontend_headers
+                        )
                         if login_res.status_code == 200:
                             login_data = login_res.json()
                             if login_data.get("success"):
                                 st.session_state.access_token = login_data["access_token"]
                                 st.session_state.user_id = login_data["user_id"]
                                 
-                                headers_profilo = {"Authorization": f"Bearer {login_data['access_token']}"}
+                                # AGGIUNTO: Unione di Bearer token e X-Token
+                                headers_profilo = {
+                                    "Authorization": f"Bearer {login_data['access_token']}",
+                                    "X-Token": X_TOKEN_VALUE
+                                }
                                 try:
                                     res_profile = requests.get(f"{BASE_URL}/get_profile", headers=headers_profilo)
                                     if res_profile.status_code == 200:
@@ -52,9 +64,7 @@ if st.session_state.access_token is None:
                                 except Exception:
                                     st.session_state.input_film_preferiti = ""
 
-                                # Mostra la notifica DIRETTAMENTE qui nella pagina di login
                                 st.success("Login avvenuto con successo!")
-                                # Attende 1 secondo per dare il tempo all'utente di vederla prima di cambiare schermata
                                 time.sleep(1)
                                 st.rerun()
                             else:
@@ -80,9 +90,11 @@ if st.session_state.access_token is None:
                         st.error("Le password non coincidono.")
                     else:
                         try:
+                            # AGGIUNTO: headers=frontend_headers
                             reg_res = requests.post(
                                 f"{BASE_URL}/register", 
-                                json={"user_id": new_username, "password": new_password}
+                                json={"user_id": new_username, "password": new_password},
+                                headers=frontend_headers
                             )
                             if reg_res.status_code == 200:
                                 reg_data = reg_res.json()
@@ -99,7 +111,10 @@ if st.session_state.access_token is None:
                     
     st.stop()
 
-auth_headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
+auth_headers = {
+    "Authorization": f"Bearer {st.session_state.access_token}",
+    "X-Token": X_TOKEN_VALUE
+}
 
 if st.sidebar.button("🚪 Logout", use_container_width=True):
     st.session_state.access_token = None

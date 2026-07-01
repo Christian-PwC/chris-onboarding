@@ -1,16 +1,18 @@
 # app.py
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from src.routers import auth_router, chat_router, user_router
 from src.config.env_loader import env
+from src.dependencies.xtoken import verify_x_token
 
 app = FastAPI(
     title="OnBoarding API", 
     description="Cinema Chatbot for Onboarding",
     version="1.0.0",
     docs_url="/docs" if env.DEBUG else None,
-    redoc_url="/redoc" if env.DEBUG else None
+    redoc_url="/redoc" if env.DEBUG else None,
+    dependencies=[Depends(verify_x_token)]
 )
 
 # Configurazione CORS
