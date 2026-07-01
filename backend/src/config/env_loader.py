@@ -25,5 +25,5 @@ class Settings(BaseSettings):
 
     DEBUG: bool = False
 
-load_dotenv(dotenv_path="../.env")
+load_dotenv(dotenv_path="./.env")
 env = Settings()
